@@ -24,7 +24,7 @@ if not openai_api_key:
 
 # User input: Natural language description
 user_prompt = st.text_area(
-    "Describe your offer (e.g., 'I want a 10% cashback for purchases over $50, valid for 7 days'):",
+    "Describe your offer (e.g., 'I want a $10 cashback for purchases over $50' or '15% discount'):",
     height=100,
 )
 
@@ -44,8 +44,8 @@ def extract_offer_parameters(prompt, api_key):
                     "content": """Extract offer parameters from the user's description. Return a JSON object with:
                     {
                         "offer_type": "cashback or discount",
-                        "percentage": (if applicable),
-                        "amount": (if fixed value),
+                        "value_type": "percentage or fixed",
+                        "value": (the numerical value),
                         "min_spend": (minimum purchase amount),
                         "duration_days": (how long the offer lasts),
                         "audience": "all or premium",
@@ -79,20 +79,20 @@ def display_offer_card(params):
     st.markdown("---")
     st.subheader("🎉 Your Created Offer")
     
-    # Offer Card Container
+    # Determine value display
+    value_display = f"{params['value']}%" if params.get('value_type') == 'percentage' else f"${params['value']}"
+    
     with st.container():
         col1, col2 = st.columns([1, 3])
         
         with col1:
-            # Offer icon based on type
             icon = "💰" if params.get("offer_type") == "cashback" else "🏷️"
             st.markdown(f"<h1 style='text-align: center;'>{icon}</h1>", unsafe_allow_html=True)
         
         with col2:
-            # Offer details
             st.markdown(f"""
             **✨ {params.get('offer_name', 'Special Offer')}**  
-            💵 **{params.get('percentage', params.get('amount', 0))}{'%' if 'percentage' in params else '$'}** {'cashback' if params.get('offer_type') == 'cashback' else 'discount'}  
+            💵 **{value_display}** {params.get('offer_type')}  
             🛒 Min. spend: **${params.get('min_spend', 0)}**  
             ⏳ Valid until: **{end_date.strftime('%b %d, %Y')}**  
             👥 For: **{params.get('audience', 'all customers').title()}**
@@ -101,8 +101,9 @@ def display_offer_card(params):
     st.markdown("---")
     st.success("This offer is now active! Copy the code below to share with customers.")
     
-    # Offer code (generated automatically)
-    offer_code = f"OFFER-{params.get('offer_type', '').upper()[:3]}-{params.get('percentage', params.get('amount', ''))}"
+    # Generate offer code
+    code_type = "FIX" if params.get('value_type') == 'fixed' else "PCT"
+    offer_code = f"OFFER-{params.get('offer_type', '').upper()[:3]}-{code_type}-{params['value']}"
     st.code(offer_code, language="text")
 
 # Extract parameters when user submits
@@ -124,25 +125,29 @@ if st.session_state.offer_params:
             ["Cashback", "Discount", "Free Shipping"],
             index=["cashback", "discount", "free shipping"].index(st.session_state.offer_params.get("offer_type", "cashback")),
         )
+        
+        # Dynamic value input based on type
+        value_label = "Percentage (%)" if st.session_state.offer_params.get('value_type') == 'percentage' else "Amount ($)"
         st.number_input(
-            "Percentage (%)" if "percentage" in st.session_state.offer_params else "Amount ($)",
-            value=st.session_state.offer_params.get("percentage", st.session_state.offer_params.get("amount", 0)),
+            value_label,
+            value=st.session_state.offer_params.get('value', 0),
+            key="offer_value"
         )
+        
     with col2:
         st.number_input(
             "Minimum Spend ($)",
-            value=st.session_state.offer_params.get("min_spend", 0),
+            value=st.session_state.offer_params.get('min_spend', 0),
         )
         st.number_input(
             "Duration (Days)",
-            value=st.session_state.offer_params.get("duration_days", 7),
+            value=st.session_state.offer_params.get('duration_days', 7),
         )
 
-    # Final confirmation - THIS IS THE FIXED BUTTON
     if st.button("🚀 Create Offer"):
         st.session_state.offer_created = True
 
-# Show offer only after creation (persists between reruns)
+# Show offer only after creation
 if st.session_state.offer_created and st.session_state.offer_params:
     display_offer_card(st.session_state.offer_params)
     st.balloons()
