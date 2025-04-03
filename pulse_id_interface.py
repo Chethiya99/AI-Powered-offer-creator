@@ -14,8 +14,6 @@ if not openai_api_key:
     st.warning("Please enter your OpenAI API key to proceed.")
     st.stop()
 
-openai.api_key = openai_api_key
-
 # User input: Natural language description
 user_prompt = st.text_area(
     "Describe your offer (e.g., 'I want a 10% cashback for purchases over $50, valid for 7 days'):",
@@ -27,26 +25,27 @@ if not user_prompt:
     st.stop()
 
 # Function to extract parameters using OpenAI
-def extract_offer_parameters(prompt):
+def extract_offer_parameters(prompt, api_key):
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+        client = openai.OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
                     "content": """Extract offer parameters from the user's description. Return a JSON with:
-- "offer_type" (e.g., "cashback", "discount")
-- "percentage" (if applicable)
-- "amount" (if fixed value)
-- "min_spend" (minimum purchase amount)
-- "duration_days" (how long the offer lasts)
-- "audience" (e.g., "all", "premium")""",
+                    - "offer_type" (e.g., "cashback", "discount")
+                    - "percentage" (if applicable)
+                    - "amount" (if fixed value)
+                    - "min_spend" (minimum purchase amount)
+                    - "duration_days" (how long the offer lasts)
+                    - "audience" (e.g., "all", "premium")""",
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
         )
-        return json.loads(response.choices[0].message["content"])
+        return json.loads(response.choices[0].message.content)
     except Exception as e:
         st.error(f"Error calling OpenAI: {e}")
         return None
@@ -54,7 +53,7 @@ def extract_offer_parameters(prompt):
 # Extract parameters when user submits
 if st.button("Generate Offer"):
     with st.spinner("Extracting offer details..."):
-        offer_params = extract_offer_parameters(user_prompt)
+        offer_params = extract_offer_parameters(user_prompt, openai_api_key)
 
     if offer_params:
         st.success("✅ Offer parameters extracted!")
@@ -68,11 +67,11 @@ if st.button("Generate Offer"):
             st.selectbox(
                 "Offer Type",
                 ["Cashback", "Discount", "Free Shipping"],
-                index=0 if offer_params.get("offer_type") == "cashback" else 1,
+                index=["cashback", "discount", "free shipping"].index(offer_params.get("offer_type", "cashback")),
             )
             st.number_input(
-                "Percentage (%)" if offer_params.get("percentage") else "Amount ($)",
-                value=offer_params.get("percentage") or offer_params.get("amount"),
+                "Percentage (%)" if "percentage" in offer_params else "Amount ($)",
+                value=offer_params.get("percentage", offer_params.get("amount", 0)),
             )
         with col2:
             st.number_input(
