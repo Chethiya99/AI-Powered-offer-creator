@@ -1,6 +1,7 @@
 import streamlit as st
 import openai
 import json
+import re
 
 # Streamlit UI Setup
 st.set_page_config(page_title="AI-Powered Offer Creator", page_icon="✨")
@@ -48,12 +49,12 @@ def extract_offer_parameters(prompt, api_key):
             temperature=0.3,
         )
 
-        # DEBUG: Print raw API response (temporarily)
-        st.write("Raw API Response:", response)
-
         # Extract content safely
         if response and response.choices:
             content = response.choices[0].message.content.strip()
+            
+            # Remove possible markdown code block
+            content = re.sub(r'```json\n(.*?)\n```', r'\1', content, flags=re.DOTALL)
             return json.loads(content)  # Convert string to dictionary
         else:
             st.error("Error: OpenAI returned an empty response.")
