@@ -33,19 +33,35 @@ def extract_offer_parameters(prompt, api_key):
             messages=[
                 {
                     "role": "system",
-                    "content": """Extract offer parameters from the user's description. Return a JSON with:
-                    - "offer_type" (e.g., "cashback", "discount")
-                    - "percentage" (if applicable)
-                    - "amount" (if fixed value)
-                    - "min_spend" (minimum purchase amount)
-                    - "duration_days" (how long the offer lasts)
-                    - "audience" (e.g., "all", "premium")""",
+                    "content": """Extract offer parameters from the user's description. Return a JSON object with:
+                    {
+                        "offer_type": "cashback or discount",
+                        "percentage": (if applicable),
+                        "amount": (if fixed value),
+                        "min_spend": (minimum purchase amount),
+                        "duration_days": (how long the offer lasts),
+                        "audience": "all or premium"
+                    }"""
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
         )
-        return json.loads(response.choices[0].message.content)
+
+        # DEBUG: Print raw API response (temporarily)
+        st.write("Raw API Response:", response)
+
+        # Extract content safely
+        if response and response.choices:
+            content = response.choices[0].message.content.strip()
+            return json.loads(content)  # Convert string to dictionary
+        else:
+            st.error("Error: OpenAI returned an empty response.")
+            return None
+
+    except json.JSONDecodeError:
+        st.error("Error: Failed to parse JSON response. OpenAI might not be returning structured data.")
+        return None
     except Exception as e:
         st.error(f"Error calling OpenAI: {e}")
         return None
