@@ -24,7 +24,7 @@ if not openai_api_key:
 
 # User input: Natural language description
 user_prompt = st.text_area(
-    "Describe your offer (e.g., 'Give $ 20 cashback for first 10 customers spending $ 500+ in 7 days'):",
+    "Describe your offer (e.g., 'Give  20 cashback for first 10 customers spending  500+ in 7 days'):",
     height=100,
 )
 
