@@ -4,6 +4,12 @@ import json
 import re
 from datetime import datetime, timedelta
 
+# Initialize session state
+if 'offer_created' not in st.session_state:
+    st.session_state.offer_created = False
+if 'offer_params' not in st.session_state:
+    st.session_state.offer_params = None
+
 # Streamlit UI Setup
 st.set_page_config(page_title="AI-Powered Offer Creator", page_icon="✨")
 st.title("💡 AI-Powered Offer Creator")
@@ -102,39 +108,41 @@ def display_offer_card(params):
 # Extract parameters when user submits
 if st.button("Generate Offer"):
     with st.spinner("Extracting offer details..."):
-        offer_params = extract_offer_parameters(user_prompt, openai_api_key)
+        st.session_state.offer_params = extract_offer_parameters(user_prompt, openai_api_key)
 
-    if offer_params:
-        st.success("✅ Offer parameters extracted!")
-        st.subheader("Extracted Parameters")
-        st.json(offer_params)
+if st.session_state.offer_params:
+    st.success("✅ Offer parameters extracted!")
+    st.subheader("Extracted Parameters")
+    st.json(st.session_state.offer_params)
 
-        # Auto-fill a mock form
-        st.subheader("📝 Offer Preview (Auto-Filled)")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.selectbox(
-                "Offer Type",
-                ["Cashback", "Discount", "Free Shipping"],
-                index=["cashback", "discount", "free shipping"].index(offer_params.get("offer_type", "cashback")),
-            )
-            st.number_input(
-                "Percentage (%)" if "percentage" in offer_params else "Amount ($)",
-                value=offer_params.get("percentage", offer_params.get("amount", 0)),
-            )
-        with col2:
-            st.number_input(
-                "Minimum Spend ($)",
-                value=offer_params.get("min_spend", 0),
-            )
-            st.number_input(
-                "Duration (Days)",
-                value=offer_params.get("duration_days", 7),
-            )
+    # Auto-fill a mock form
+    st.subheader("📝 Offer Preview (Auto-Filled)")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.selectbox(
+            "Offer Type",
+            ["Cashback", "Discount", "Free Shipping"],
+            index=["cashback", "discount", "free shipping"].index(st.session_state.offer_params.get("offer_type", "cashback")),
+        )
+        st.number_input(
+            "Percentage (%)" if "percentage" in st.session_state.offer_params else "Amount ($)",
+            value=st.session_state.offer_params.get("percentage", st.session_state.offer_params.get("amount", 0)),
+        )
+    with col2:
+        st.number_input(
+            "Minimum Spend ($)",
+            value=st.session_state.offer_params.get("min_spend", 0),
+        )
+        st.number_input(
+            "Duration (Days)",
+            value=st.session_state.offer_params.get("duration_days", 7),
+        )
 
-        # Final confirmation
-        if st.button("🚀 Create Offer"):
-            display_offer_card(offer_params)
-            st.balloons()
-    else:
-        st.error("Failed to extract parameters. Try a clearer description.")
+    # Final confirmation - THIS IS THE FIXED BUTTON
+    if st.button("🚀 Create Offer"):
+        st.session_state.offer_created = True
+
+# Show offer only after creation (persists between reruns)
+if st.session_state.offer_created and st.session_state.offer_params:
+    display_offer_card(st.session_state.offer_params)
+    st.balloons()
