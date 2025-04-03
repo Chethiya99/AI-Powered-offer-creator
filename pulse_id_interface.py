@@ -2,6 +2,7 @@ import streamlit as st
 import openai
 import json
 import re
+from datetime import datetime, timedelta
 
 # Streamlit UI Setup
 st.set_page_config(page_title="AI-Powered Offer Creator", page_icon="✨")
@@ -41,7 +42,8 @@ def extract_offer_parameters(prompt, api_key):
                         "amount": (if fixed value),
                         "min_spend": (minimum purchase amount),
                         "duration_days": (how long the offer lasts),
-                        "audience": "all or premium"
+                        "audience": "all or premium",
+                        "offer_name": "creative name for the offer"
                     }"""
                 },
                 {"role": "user", "content": prompt},
@@ -49,13 +51,10 @@ def extract_offer_parameters(prompt, api_key):
             temperature=0.3,
         )
 
-        # Extract content safely
         if response and response.choices:
             content = response.choices[0].message.content.strip()
-            
-            # Remove possible markdown code block
             content = re.sub(r'```json\n(.*?)\n```', r'\1', content, flags=re.DOTALL)
-            return json.loads(content)  # Convert string to dictionary
+            return json.loads(content)
         else:
             st.error("Error: OpenAI returned an empty response.")
             return None
@@ -66,6 +65,39 @@ def extract_offer_parameters(prompt, api_key):
     except Exception as e:
         st.error(f"Error calling OpenAI: {e}")
         return None
+
+# Function to display offer beautifully
+def display_offer_card(params):
+    end_date = datetime.now() + timedelta(days=params.get("duration_days", 7))
+    
+    st.markdown("---")
+    st.subheader("🎉 Your Created Offer")
+    
+    # Offer Card Container
+    with st.container():
+        col1, col2 = st.columns([1, 3])
+        
+        with col1:
+            # Offer icon based on type
+            icon = "💰" if params.get("offer_type") == "cashback" else "🏷️"
+            st.markdown(f"<h1 style='text-align: center;'>{icon}</h1>", unsafe_allow_html=True)
+        
+        with col2:
+            # Offer details
+            st.markdown(f"""
+            **✨ {params.get('offer_name', 'Special Offer')}**  
+            💵 **{params.get('percentage', params.get('amount', 0))}{'%' if 'percentage' in params else '$'}** {'cashback' if params.get('offer_type') == 'cashback' else 'discount'}  
+            🛒 Min. spend: **${params.get('min_spend', 0)}**  
+            ⏳ Valid until: **{end_date.strftime('%b %d, %Y')}**  
+            👥 For: **{params.get('audience', 'all customers').title()}**
+            """)
+    
+    st.markdown("---")
+    st.success("This offer is now active! Copy the code below to share with customers.")
+    
+    # Offer code (generated automatically)
+    offer_code = f"OFFER-{params.get('offer_type', '').upper()[:3]}-{params.get('percentage', params.get('amount', ''))}"
+    st.code(offer_code, language="text")
 
 # Extract parameters when user submits
 if st.button("Generate Offer"):
@@ -102,7 +134,7 @@ if st.button("Generate Offer"):
 
         # Final confirmation
         if st.button("🚀 Create Offer"):
+            display_offer_card(offer_params)
             st.balloons()
-            st.success("Offer created successfully! (Demo)")
     else:
         st.error("Failed to extract parameters. Try a clearer description.")
