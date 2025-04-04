@@ -149,6 +149,15 @@ if st.button("Generate Offer") and user_prompt:
         st.session_state.offer_created = True
         st.rerun()
 
+if st.session_state.offer_params:
+    st.success("✅ Offer parameters extracted!")
+    
+    # Display raw parameters (with formatted currency)
+    params_display = st.session_state.offer_params.copy()
+    if 'min_spend' in params_display:
+        params_display['min_spend'] = format_currency(params_display['min_spend'])
+    st.json(params_display)
+
 if st.session_state.offer_created and st.session_state.adjusted_params:
     st.success("✅ Adjust the offer below and see changes in real-time:")
     
