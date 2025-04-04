@@ -5,15 +5,14 @@ import re
 from datetime import datetime, timedelta
 
 # Initialize session state
-if 'offer_params' not in st.session_state:
-    st.session_state.offer_params = None
 if 'offer_created' not in st.session_state:
     st.session_state.offer_created = False
-if 'adjusted_params' not in st.session_state:
-    st.session_state.adjusted_params = None
+if 'offer_params' not in st.session_state:
+    st.session_state.offer_params = None
 
 # Helper function for consistent dollar formatting
 def format_currency(amount):
+    """Ensures $ signs display properly in Markdown"""
     return f"\\${amount}"  # Escaped for Markdown
 
 # Streamlit UI Setup
@@ -35,7 +34,11 @@ user_prompt = st.text_area(
     help="Use dollar signs normally - we'll handle the formatting automatically"
 )
 
-# Enhanced extraction function
+if not user_prompt:
+    st.warning("Please describe your offer.")
+    st.stop()
+
+# Enhanced extraction with currency handling
 def extract_offer_parameters(prompt, api_key):
     try:
         client = openai.OpenAI(api_key=api_key)
@@ -44,119 +47,119 @@ def extract_offer_parameters(prompt, api_key):
             messages=[
                 {
                     "role": "system",
-                    "content": """Extract offer details. Return JSON with:
+                    "content": """Extract offer details and format ALL currency values as numbers (without $ signs). Return JSON with:
                     {
                         "offer_type": "cashback/discount/free_shipping",
                         "value_type": "percentage/fixed",
-                        "value": 20,
-                        "min_spend": 500,
+                        "value": 20 (NOT $20),
+                        "min_spend": 500 (NOT $500),
                         "duration_days": 7,
                         "audience": "all/premium/etc",
                         "offer_name": "creative name",
-                        "max_redemptions": null,
-                        "conditions": [],
-                        "description": "marketing text"
+                        "max_redemptions": 10,
+                        "conditions": ["first X customers"],
+                        "description": "marketing text WITHOUT $ signs"
                     }"""
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.2,
         )
+
         if response and response.choices:
             content = response.choices[0].message.content.strip()
             content = re.sub(r'```json\n?(.*?)\n?```', r'\1', content, flags=re.DOTALL)
             return json.loads(content)
         return None
     except Exception as e:
-        st.error(f"Extraction error: {str(e)}")
+        st.error(f"Error: {str(e)}")
         return None
 
-# Dynamic offer editor - NOW UPDATES SESSION STATE DIRECTLY
-def offer_editor():
-    cols = st.columns(2)
-    with cols[0]:
-        st.session_state.adjusted_params["offer_name"] = st.text_input(
-            "Offer Name", 
-            value=st.session_state.adjusted_params.get("offer_name", "")
-        )
-        st.session_state.adjusted_params["offer_type"] = st.selectbox(
-            "Type",
-            ["cashback", "discount", "free_shipping"],
-            index=["cashback", "discount", "free_shipping"].index(
-                st.session_state.adjusted_params.get("offer_type", "cashback")
-            )
-        )
-        st.session_state.adjusted_params["value"] = st.number_input(
-            "Percentage (%)" if st.session_state.adjusted_params.get("value_type") == "percentage" else "Amount ($)",
-            value=st.session_state.adjusted_params.get("value", 0),
-            key="value_input"
-        )
-    
-    with cols[1]:
-        st.session_state.adjusted_params["min_spend"] = st.number_input(
-            "Minimum Spend ($)",
-            value=st.session_state.adjusted_params.get("min_spend", 0),
-            key="min_spend_input"
-        )
-        st.session_state.adjusted_params["duration_days"] = st.number_input(
-            "Duration (Days)",
-            value=st.session_state.adjusted_params.get("duration_days", 7),
-            key="duration_input"
-        )
-        if st.session_state.adjusted_params.get("max_redemptions"):
-            st.session_state.adjusted_params["max_redemptions"] = st.number_input(
-                "Max Redemptions",
-                value=st.session_state.adjusted_params.get("max_redemptions"),
-                key="max_redemptions_input"
-            )
-
-# Offer display component
-def display_offer(params):
+# Unified currency display in offer card
+def display_offer_card(params):
     end_date = datetime.now() + timedelta(days=params.get("duration_days", 7))
-    value_display = f"{params['value']}%" if params.get("value_type") == "percentage" else format_currency(params['value'])
     
-    with st.container():
-        st.markdown("---")
-        st.subheader("🎉 Your Created Offer")
-        cols = st.columns([1, 3])
-        
-        with cols[0]:
-            icon = "💰" if params.get("offer_type") == "cashback" else "🏷️"
-            st.markdown(f"<h1 style='text-align: center;'>{icon}</h1>", unsafe_allow_html=True)
-        
-        with cols[1]:
-            st.markdown(f"""
-            **✨ {params.get('offer_name', 'Special Offer')}**  
-            💵 **{value_display}** {params.get('offer_type')}  
-            🛒 Min. spend: **{format_currency(params.get('min_spend', 0))}**  
-            ⏳ Valid until: **{end_date.strftime('%b %d, %Y')}**  
-            👥 For: **{params.get('audience', 'all customers').title()}**
-            """, unsafe_allow_html=True)
-            
-            if params.get("conditions"):
-                st.markdown("**Conditions:**")
-                for condition in params["conditions"]:
-                    st.markdown(f"- {condition}")
+    # Format all currency values consistently
+    value_display = f"{params['value']}%" if params.get('value_type') == 'percentage' else format_currency(params['value'])
+    min_spend_display = format_currency(params.get('min_spend', 0))
     
     st.markdown("---")
-    st.success("Offer updated successfully!")
+    st.subheader("🎉 Your Created Offer")
+    
+    with st.container():
+        col1, col2 = st.columns([1, 3])
+        
+        with col1:
+            icon = "🎯" if params.get('max_redemptions') else "💰" if params.get("offer_type") == "cashback" else "🏷️"
+            st.markdown(f"<h1 style='text-align: center;'>{icon}</h1>", unsafe_allow_html=True)
+        
+        with col2:
+            # Using st.markdown with escaped $ signs
+            st.markdown(f"""
+            **✨ {params.get('offer_name', 'Exclusive Offer')}**  
+            💵 **{value_display}** {params.get('offer_type').replace('_', ' ')}  
+            🛒 Min. spend: **{min_spend_display}**  
+            ⏳ Ends: **{end_date.strftime('%b %d, %Y')}**  
+            👥 For: **{params.get('audience', 'eligible customers').title()}**
+            """, unsafe_allow_html=True)
+            
+            if params.get('max_redemptions'):
+                st.markdown(f"🔢 **First {params['max_redemptions']} customers only**")
+            
+            if params.get('conditions'):
+                st.markdown("📌 **Conditions:**")
+                for condition in params['conditions']:
+                    st.markdown(f"- {condition.capitalize()}")
 
-# Main workflow
-if st.button("Generate Offer") and user_prompt:
-    with st.spinner("Creating your offer..."):
+    # Clean description rendering
+    description = params.get('description', 'Special limited-time offer').replace('$', '\\$')
+    st.markdown(f"📝 **Description:** {description}", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.success("This offer is now active! Share this code with customers:")
+    
+    # Generate offer code (no formatting issues here)
+    base_code = f"OFFER-{params.get('offer_type', '').upper()[:4]}"
+    if params.get('max_redemptions'):
+        base_code += f"-LIM{params['max_redemptions']}"
+    st.code(f"{base_code}-{params['value']}{'P' if params.get('value_type') == 'percentage' else 'F'}")
+
+# Processing flow
+if st.button("Generate Offer"):
+    with st.spinner("Analyzing your offer..."):
         st.session_state.offer_params = extract_offer_parameters(user_prompt, openai_api_key)
-        st.session_state.adjusted_params = st.session_state.offer_params.copy()
-        st.session_state.offer_created = True
-        st.rerun()
 
-if st.session_state.offer_created and st.session_state.adjusted_params:
-    st.success("✅ Adjust the offer below and see changes in real-time:")
+if st.session_state.offer_params:
+    st.success("✅ Offer parameters extracted!")
     
-    # Edit form - NOW DIRECTLY MODIFIES SESSION STATE
-    offer_editor()
-    
-    # Display the CURRENTLY EDITED offer (not the original)
-    display_offer(st.session_state.adjusted_params)
-    
-    if st.button("🔄 Refresh Preview"):
-        st.rerun()
+    # Display raw parameters (with formatted currency)
+    params_display = st.session_state.offer_params.copy()
+    if 'min_spend' in params_display:
+        params_display['min_spend'] = format_currency(params_display['min_spend'])
+    st.json(params_display)
+
+    # Form preview with consistent formatting
+    st.subheader("📝 Offer Preview")
+    cols = st.columns(2)
+    with cols[0]:
+        st.text_input("Offer Name", value=st.session_state.offer_params.get('offer_name', ''))
+        offer_type = st.session_state.offer_params.get("offer_type", "cashback")
+        st.selectbox("Type", ["Cashback", "Discount", "Free Shipping"], 
+                    index=["cashback", "discount", "free_shipping"].index(offer_type))
+        
+        value_label = "Percentage (%)" if st.session_state.offer_params.get('value_type') == 'percentage' else f"Amount ({format_currency(0)[:-1]})"
+        st.number_input(value_label, value=st.session_state.offer_params.get('value', 0))
+        
+    with cols[1]:
+        st.number_input(f"Min. Spend ({format_currency(0)[:-1]})", 
+                      value=st.session_state.offer_params.get('min_spend', 0))
+        st.number_input("Duration (Days)", value=st.session_state.offer_params.get('duration_days', 7))
+        if st.session_state.offer_params.get('max_redemptions'):
+            st.number_input("Max Redemptions", value=st.session_state.offer_params['max_redemptions'])
+
+    if st.button("🚀 Create Offer Now"):
+        st.session_state.offer_created = True
+
+if st.session_state.offer_created and st.session_state.offer_params:
+    display_offer_card(st.session_state.offer_params)
+    st.balloons()
