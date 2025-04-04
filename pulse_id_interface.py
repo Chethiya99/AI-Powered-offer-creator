@@ -70,44 +70,44 @@ def extract_offer_parameters(prompt, api_key):
         st.error(f"Extraction error: {str(e)}")
         return None
 
-# Dynamic offer editor
-def offer_editor(params):
-    edited_params = params.copy()
-    
+# Dynamic offer editor - NOW UPDATES SESSION STATE DIRECTLY
+def offer_editor():
     cols = st.columns(2)
     with cols[0]:
-        edited_params["offer_name"] = st.text_input("Offer Name", value=params.get("offer_name", ""))
-        edited_params["offer_type"] = st.selectbox(
+        st.session_state.adjusted_params["offer_name"] = st.text_input(
+            "Offer Name", 
+            value=st.session_state.adjusted_params.get("offer_name", "")
+        )
+        st.session_state.adjusted_params["offer_type"] = st.selectbox(
             "Type",
             ["cashback", "discount", "free_shipping"],
-            index=["cashback", "discount", "free_shipping"].index(params.get("offer_type", "cashback"))
+            index=["cashback", "discount", "free_shipping"].index(
+                st.session_state.adjusted_params.get("offer_type", "cashback")
+            )
         )
-        value_key = "percentage" if params.get("value_type") == "percentage" else "amount"
-        edited_params["value"] = st.number_input(
-            "Percentage (%)" if params.get("value_type") == "percentage" else "Amount ($)",
-            value=params.get("value", 0),
+        st.session_state.adjusted_params["value"] = st.number_input(
+            "Percentage (%)" if st.session_state.adjusted_params.get("value_type") == "percentage" else "Amount ($)",
+            value=st.session_state.adjusted_params.get("value", 0),
             key="value_input"
         )
     
     with cols[1]:
-        edited_params["min_spend"] = st.number_input(
+        st.session_state.adjusted_params["min_spend"] = st.number_input(
             "Minimum Spend ($)",
-            value=params.get("min_spend", 0),
+            value=st.session_state.adjusted_params.get("min_spend", 0),
             key="min_spend_input"
         )
-        edited_params["duration_days"] = st.number_input(
+        st.session_state.adjusted_params["duration_days"] = st.number_input(
             "Duration (Days)",
-            value=params.get("duration_days", 7),
+            value=st.session_state.adjusted_params.get("duration_days", 7),
             key="duration_input"
         )
-        if params.get("max_redemptions"):
-            edited_params["max_redemptions"] = st.number_input(
+        if st.session_state.adjusted_params.get("max_redemptions"):
+            st.session_state.adjusted_params["max_redemptions"] = st.number_input(
                 "Max Redemptions",
-                value=params.get("max_redemptions"),
+                value=st.session_state.adjusted_params.get("max_redemptions"),
                 key="max_redemptions_input"
             )
-    
-    return edited_params
 
 # Offer display component
 def display_offer(params):
@@ -116,7 +116,7 @@ def display_offer(params):
     
     with st.container():
         st.markdown("---")
-        st.subheader("🎉 Final Offer Details")
+        st.subheader("🎉 Your Created Offer")
         cols = st.columns([1, 3])
         
         with cols[0]:
@@ -138,24 +138,24 @@ def display_offer(params):
                     st.markdown(f"- {condition}")
     
     st.markdown("---")
-    st.success("Offer is ready!")
+    st.success("Offer updated successfully!")
 
 # Main workflow
 if st.button("Generate Offer") and user_prompt:
     with st.spinner("Creating your offer..."):
         st.session_state.offer_params = extract_offer_parameters(user_prompt, openai_api_key)
-        st.session_state.adjusted_params = None
-
-if st.session_state.offer_params:
-    st.success("✅ Offer created! Adjust values below:")
-    
-    # Edit form
-    st.session_state.adjusted_params = offer_editor(st.session_state.offer_params)
-    
-    if st.button("🔁 Update Offer"):
+        st.session_state.adjusted_params = st.session_state.offer_params.copy()
         st.session_state.offer_created = True
         st.rerun()
 
 if st.session_state.offer_created and st.session_state.adjusted_params:
+    st.success("✅ Adjust the offer below and see changes in real-time:")
+    
+    # Edit form - NOW DIRECTLY MODIFIES SESSION STATE
+    offer_editor()
+    
+    # Display the CURRENTLY EDITED offer (not the original)
     display_offer(st.session_state.adjusted_params)
-    st.balloons()
+    
+    if st.button("🔄 Refresh Preview"):
+        st.rerun()
