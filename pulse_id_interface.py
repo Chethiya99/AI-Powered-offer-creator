@@ -12,14 +12,25 @@ if 'offer_created' not in st.session_state:
 if 'adjusted_params' not in st.session_state:
     st.session_state.adjusted_params = None
 
-# Helper function for consistent dollar formatting
-def format_currency(amount):
-    return f"\\${amount}"  # Escaped for Markdown
+# Enhanced currency formatting helper
+def format_currency(amount, escape=True):
+    """Handles dollar signs consistently throughout the app"""
+    if escape:
+        return f"\\${amount}"  # Escaped for Markdown
+    return f"${amount}"  # For non-Markdown contexts
 
 # Streamlit UI Setup
 st.set_page_config(page_title="AI-Powered Offer Creator", page_icon="✨")
 st.title("💡 AI-Powered Offer Creator")
-st.markdown("Describe your offer in plain English, and let AI extract the details for you!")
+
+# Input section with proper dollar sign examples
+with st.expander("💡 How to describe offers", expanded=True):
+    st.markdown("""
+    Examples:
+    - `Give 10% cashback for orders over \\$50`
+    - `\\$20 fixed discount for first 100 customers`
+    - `15% off for premium members spending \\$200+`
+    """)
 
 # Securely input OpenAI API key
 openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
@@ -28,13 +39,14 @@ if not openai_api_key:
     st.warning("Please enter your OpenAI API key to proceed.")
     st.stop()
 
-# User input
+# User input with safe rendering
 user_prompt = st.text_area(
-    "Describe your offer (e.g., 'Give \\$20 cashback for first 10 customers spending \\$500+ in 7 days'):",
-    height=100
+    "Describe your offer:",
+    height=100,
+    help="Include amounts like $20 or percentages like 10%"
 )
 
-# Enhanced extraction function
+# Enhanced extraction with dollar sign sanitization
 def extract_offer_parameters(prompt, api_key):
     try:
         client = openai.OpenAI(api_key=api_key)
@@ -43,18 +55,18 @@ def extract_offer_parameters(prompt, api_key):
             messages=[
                 {
                     "role": "system",
-                    "content": """Extract offer details. Return JSON with:
+                    "content": """Extract offer details. NEVER include $ signs in JSON values. Return:
                     {
                         "offer_type": "cashback/discount/free_shipping",
                         "value_type": "percentage/fixed",
-                        "value": 20,
-                        "min_spend": 500,
+                        "value": 20, // NEVER $20
+                        "min_spend": 50, // NEVER $50
                         "duration_days": 7,
                         "audience": "all/premium/etc",
-                        "offer_name": "creative name",
+                        "offer_name": "name",
                         "max_redemptions": null,
                         "conditions": [],
-                        "description": "marketing text"
+                        "description": "text WITHOUT $ signs"
                     }"""
                 },
                 {"role": "user", "content": prompt},
@@ -64,61 +76,72 @@ def extract_offer_parameters(prompt, api_key):
         if response and response.choices:
             content = response.choices[0].message.content.strip()
             content = re.sub(r'```json\n?(.*?)\n?```', r'\1', content, flags=re.DOTALL)
+            # Remove any remaining $ signs in values
+            content = re.sub(r'"(\$?)(\d+)"', r'"\2"', content)
             return json.loads(content)
         return None
     except Exception as e:
         st.error(f"Extraction error: {str(e)}")
         return None
 
-# Dynamic offer editor - NOW UPDATES SESSION STATE DIRECTLY
-def offer_editor():
+# Form builder with safe dollar rendering
+def build_offer_form(params):
     cols = st.columns(2)
     with cols[0]:
-        st.session_state.adjusted_params["offer_name"] = st.text_input(
+        params["offer_name"] = st.text_input(
             "Offer Name", 
-            value=st.session_state.adjusted_params.get("offer_name", "")
+            value=params.get("offer_name", ""),
+            key="offer_name_input"
         )
-        st.session_state.adjusted_params["offer_type"] = st.selectbox(
+        params["offer_type"] = st.selectbox(
             "Type",
             ["cashback", "discount", "free_shipping"],
             index=["cashback", "discount", "free_shipping"].index(
-                st.session_state.adjusted_params.get("offer_type", "cashback")
-            )
+                params.get("offer_type", "cashback")
+            ),
+            key="offer_type_input"
         )
-        st.session_state.adjusted_params["value"] = st.number_input(
-            "Percentage (%)" if st.session_state.adjusted_params.get("value_type") == "percentage" else "Amount ($)",
-            value=st.session_state.adjusted_params.get("value", 0),
+        
+        # Dynamic value input
+        value_label = "Percentage (%)" if params.get("value_type") == "percentage" else f"Amount ({format_currency(0, escape=False)})"
+        params["value"] = st.number_input(
+            value_label,
+            value=params.get("value", 0),
             key="value_input"
         )
     
     with cols[1]:
-        st.session_state.adjusted_params["min_spend"] = st.number_input(
-            "Minimum Spend ($)",
-            value=st.session_state.adjusted_params.get("min_spend", 0),
+        params["min_spend"] = st.number_input(
+            f"Minimum Spend ({format_currency(0, escape=False)})",
+            value=params.get("min_spend", 0),
             key="min_spend_input"
         )
-        st.session_state.adjusted_params["duration_days"] = st.number_input(
+        params["duration_days"] = st.number_input(
             "Duration (Days)",
-            value=st.session_state.adjusted_params.get("duration_days", 7),
+            value=params.get("duration_days", 7),
             key="duration_input"
         )
-        if st.session_state.adjusted_params.get("max_redemptions"):
-            st.session_state.adjusted_params["max_redemptions"] = st.number_input(
+        if params.get("max_redemptions"):
+            params["max_redemptions"] = st.number_input(
                 "Max Redemptions",
-                value=st.session_state.adjusted_params.get("max_redemptions"),
+                value=params.get("max_redemptions"),
                 key="max_redemptions_input"
             )
 
-# Offer display component
+# Offer display with perfect dollar handling
 def display_offer(params):
     end_date = datetime.now() + timedelta(days=params.get("duration_days", 7))
-    value_display = f"{params['value']}%" if params.get("value_type") == "percentage" else format_currency(params['value'])
+    value_display = (
+        f"{params['value']}%" 
+        if params.get("value_type") == "percentage" 
+        else format_currency(params['value'])
+    )
     
     with st.container():
         st.markdown("---")
-        st.subheader("🎉 Your Created Offer")
-        cols = st.columns([1, 3])
+        st.subheader("🎉 Final Offer")
         
+        cols = st.columns([1, 3])
         with cols[0]:
             icon = "💰" if params.get("offer_type") == "cashback" else "🏷️"
             st.markdown(f"<h1 style='text-align: center;'>{icon}</h1>", unsafe_allow_html=True)
@@ -135,27 +158,29 @@ def display_offer(params):
             if params.get("conditions"):
                 st.markdown("**Conditions:**")
                 for condition in params["conditions"]:
-                    st.markdown(f"- {condition}")
+                    st.markdown(f"- {condition.replace('$', '\\$')}")
     
     st.markdown("---")
-    st.success("Offer updated successfully!")
+    st.success("Offer is ready to use!")
 
 # Main workflow
 if st.button("Generate Offer") and user_prompt:
     with st.spinner("Creating your offer..."):
         st.session_state.offer_params = extract_offer_parameters(user_prompt, openai_api_key)
-        st.session_state.adjusted_params = st.session_state.offer_params.copy()
-        st.session_state.offer_created = True
-        st.rerun()
+        if st.session_state.offer_params:
+            st.session_state.adjusted_params = json.loads(json.dumps(st.session_state.offer_params))  # Deep copy
+            st.session_state.offer_created = True
+            st.rerun()
 
 if st.session_state.offer_created and st.session_state.adjusted_params:
-    st.success("✅ Adjust the offer below and see changes in real-time:")
+    st.success("✅ Adjust your offer below:")
     
-    # Edit form - NOW DIRECTLY MODIFIES SESSION STATE
-    offer_editor()
+    # Build the editing form
+    build_offer_form(st.session_state.adjusted_params)
     
-    # Display the CURRENTLY EDITED offer (not the original)
+    # Display the current offer (updates live)
     display_offer(st.session_state.adjusted_params)
     
-    if st.button("🔄 Refresh Preview"):
-        st.rerun()
+    # Debug view (optional)
+    with st.expander("Debug: Current Offer Data"):
+        st.json(st.session_state.adjusted_params)
