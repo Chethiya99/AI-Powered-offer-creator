@@ -2,222 +2,170 @@ import streamlit as st
 import openai
 import json
 import re
-import requests
 from datetime import datetime, timedelta
 
 # Initialize session state
 if 'offer_params' not in st.session_state:
     st.session_state.offer_params = None
-if 'lms_auth' not in st.session_state:
-    st.session_state.lms_auth = {
-        'auth_token': None,
-        'permission_token': None,
-        'last_refreshed': None
-    }
+if 'offer_created' not in st.session_state:
+    st.session_state.offer_created = False
+if 'adjusted_params' not in st.session_state:
+    st.session_state.adjusted_params = None
 
-# LMS Configuration
-LMS_CONFIG = {
-    'AUTH_URL': "https://lmsdev.pulseid.com/1.0/auth/login-v2",
-    'OFFER_URL': "https://lmsdev-marketplace-api.pulseid.com/offer/show-and-save",
-    'CLIENT_ID': "315",
-    'MERCHANT_ID': 1361,
-    'CREDENTIALS': {
-        "email": "randil+offeragent@pulseid.com",
-        "password": "Test@123",  # Replace with st.secrets in production
-        "app": "lms"
-    }
-}
+# Helper function for consistent dollar formatting
+def format_currency(amount):
+    return f"\\${amount}"  # Escaped for Markdown
 
-# Auth Management
-def refresh_lms_tokens():
-    """Get fresh LMS tokens with error handling"""
+# Streamlit UI Setup
+st.set_page_config(page_title="AI-Powered Offer Creator", page_icon="✨")
+st.title("💡 AI-Powered Offer Creator")
+st.markdown("Describe your offer in plain English, and let AI extract the details for you!")
+
+# Securely input OpenAI API key
+openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
+
+if not openai_api_key:
+    st.warning("Please enter your OpenAI API key to proceed.")
+    st.stop()
+
+# User input with better examples
+user_prompt = st.text_area(
+    "Describe your offer (e.g., 'Give \\$20 cashback for first 10 customers spending \\$500+ in 7 days'):",
+    height=100,
+    help="Use dollar signs normally - we'll handle the formatting automatically"
+)
+
+# Enhanced extraction function
+def extract_offer_parameters(prompt, api_key):
     try:
-        response = requests.post(
-            LMS_CONFIG['AUTH_URL'],
-            json=LMS_CONFIG['CREDENTIALS'],
-            timeout=10
-        )
-        if response.status_code == 200:
-            data = response.json()
-            st.session_state.lms_auth = {
-                'auth_token': data["authToken"],
-                'permission_token': data["permissionToken"],
-                'last_refreshed': datetime.now()
-            }
-            return True
-        else:
-            st.error(f"Auth Failed (HTTP {response.status_code}): {response.text}")
-    except Exception as e:
-        st.error(f"Auth Connection Error: {str(e)}")
-    return False
-
-def get_valid_tokens():
-    """Returns valid tokens, refreshing if needed"""
-    if not st.session_state.lms_auth['auth_token']:
-        if not refresh_lms_tokens():
-            return None, None
-    
-    # Optional: Add token expiration check here if LMS provides expires_in
-    return (
-        st.session_state.lms_auth['auth_token'],
-        st.session_state.lms_auth['permission_token']
-    )
-
-# Offer Transformation
-def build_lms_payload(offer_params):
-    """Convert our format to LMS API spec"""
-    end_date = datetime.now() + timedelta(days=offer_params.get("duration_days", 7))
-    
-    return {
-        "merchantInfo": {
-            "merchant": LMS_CONFIG['MERCHANT_ID'],
-            "locations": []
-        },
-        "rules": {
-            "reward_type": "CASHBACK" if offer_params["offer_type"] == "cashback" else "DISCOUNT",
-            "redemption_mechanism": "QR_CODE",
-            "code_applicability": "SINGLE_USAGE",
-            "reward_limit": offer_params.get("max_redemptions", 100),
-            "store_locations_codes": []
-        },
-        "addRules": {
-            "no_end_date": "N",
-            "start_date": datetime.now().strftime("%Y-%m-%d 00:00:00"),
-            "end_date": end_date.strftime("%Y-%m-%d 23:59:59"),
-            "timezone": "Asia/Colombo",
-            "purchase_channel": "E-COMMERCE"
-        },
-        "content": [{
-            "language": "en",
-            "offer_title": offer_params.get("offer_name", "Special Offer"),
-            "offer_description": build_offer_description(offer_params),
-            "offer_terms_con": build_offer_terms(offer_params)
-        }]
-    }
-
-def build_offer_description(params):
-    """Generate marketing-friendly description"""
-    value_part = f"{params['value']}%" if params["value_type"] == "percentage" else f"${params['value']}"
-    return f"{value_part} {params['offer_type']} on orders over ${params.get('min_spend', 0)}"
-
-def build_offer_terms(params):
-    """Generate formatted terms"""
-    terms = [
-        f"Valid until {(datetime.now() + timedelta(days=params.get('duration_days', 7)):%b %d, %Y}",
-        f"Min. spend: ${params.get('min_spend', 0)}"
-    ]
-    if params.get("max_redemptions"):
-        terms.append(f"First {params['max_redemptions']} customers only")
-    return "\n".join([f"• {term}" for term in terms])
-
-# Streamlit UI
-st.set_page_config(page_title="LMS Offer Creator", page_icon="✨")
-st.title("🚀 LMS Offer Creator")
-
-# 1. Authentication Section
-with st.expander("🔐 LMS Authentication", expanded=True):
-    if st.button("Authenticate with LMS"):
-        if refresh_lms_tokens():
-            st.success("Successfully authenticated with LMS!")
-    
-    if st.session_state.lms_auth['auth_token']:
-        st.info(f"Last authenticated: {st.session_state.lms_auth['last_refreshed']:%Y-%m-%d %H:%M}")
-    else:
-        st.warning("Not authenticated with LMS")
-
-# 2. Offer Creation
-openai_api_key = st.text_input("OpenAI API Key:", type="password")
-user_prompt = st.text_area("Describe your offer:", height=100)
-
-if st.button("Generate Offer") and user_prompt and openai_api_key:
-    with st.spinner("Analyzing your offer..."):
-        try:
-            client = openai.OpenAI(api_key=openai_api_key)
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{
+        client = openai.OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
                     "role": "system",
-                    "content": """Extract offer details as JSON with:
-                    offer_type, value_type, value, min_spend, duration_days, 
-                    offer_name, max_redemptions, conditions"""
-                }, {"role": "user", "content": user_prompt}],
-                temperature=0.2
-            )
-            content = re.sub(r'```json\n?(.*?)\n?```', r'\1', response.choices[0].message.content, flags=re.DOTALL)
-            st.session_state.offer_params = json.loads(content)
-            st.success("Offer parameters extracted!")
-        except Exception as e:
-            st.error(f"Error generating offer: {str(e)}")
+                    "content": """Extract offer details. Return JSON with:
+                    {
+                        "offer_type": "cashback/discount/free_shipping",
+                        "value_type": "percentage/fixed",
+                        "value": 20,
+                        "min_spend": 500,
+                        "duration_days": 7,
+                        "audience": "all/premium/etc",
+                        "offer_name": "creative name",
+                        "max_redemptions": null,
+                        "conditions": [],
+                        "description": "marketing text"
+                    }"""
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        if response and response.choices:
+            content = response.choices[0].message.content.strip()
+            content = re.sub(r'```json\n?(.*?)\n?```', r'\1', content, flags=re.DOTALL)
+            return json.loads(content)
+        return None
+    except Exception as e:
+        st.error(f"Extraction error: {str(e)}")
+        return None
 
-# 3. Offer Preview & Publishing
-if st.session_state.offer_params:
-    st.subheader("📝 Offer Preview")
-    
-    # Editable Fields
+# Dynamic offer editor - NOW UPDATES SESSION STATE DIRECTLY
+def offer_editor():
     cols = st.columns(2)
     with cols[0]:
-        st.session_state.offer_params["offer_name"] = st.text_input(
+        st.session_state.adjusted_params["offer_name"] = st.text_input(
             "Offer Name", 
-            value=st.session_state.offer_params.get("offer_name", "Special Offer")
+            value=st.session_state.adjusted_params.get("offer_name", "")
         )
-        st.session_state.offer_params["value"] = st.number_input(
-            "Value", 
-            value=st.session_state.offer_params["value"]
+        st.session_state.adjusted_params["offer_type"] = st.selectbox(
+            "Type",
+            ["cashback", "discount", "free_shipping"],
+            index=["cashback", "discount", "free_shipping"].index(
+                st.session_state.adjusted_params.get("offer_type", "cashback")
+            )
         )
-        
+        st.session_state.adjusted_params["value"] = st.number_input(
+            "Percentage (%)" if st.session_state.adjusted_params.get("value_type") == "percentage" else "Amount ($)",
+            value=st.session_state.adjusted_params.get("value", 0),
+            key="value_input"
+        )
+    
     with cols[1]:
-        st.session_state.offer_params["min_spend"] = st.number_input(
-            "Minimum Spend", 
-            value=st.session_state.offer_params.get("min_spend", 0)
+        st.session_state.adjusted_params["min_spend"] = st.number_input(
+            "Minimum Spend ($)",
+            value=st.session_state.adjusted_params.get("min_spend", 0),
+            key="min_spend_input"
         )
-        st.session_state.offer_params["duration_days"] = st.number_input(
-            "Duration (Days)", 
-            value=st.session_state.offer_params.get("duration_days", 7)
+        st.session_state.adjusted_params["duration_days"] = st.number_input(
+            "Duration (Days)",
+            value=st.session_state.adjusted_params.get("duration_days", 7),
+            key="duration_input"
         )
+        if st.session_state.adjusted_params.get("max_redemptions"):
+            st.session_state.adjusted_params["max_redemptions"] = st.number_input(
+                "Max Redemptions",
+                value=st.session_state.adjusted_params.get("max_redemptions"),
+                key="max_redemptions_input"
+            )
+
+# Offer display component
+def display_offer(params):
+    end_date = datetime.now() + timedelta(days=params.get("duration_days", 7))
+    value_display = f"{params['value']}%" if params.get("value_type") == "percentage" else format_currency(params['value'])
     
-    # Publish Button
-    if st.button("🚀 Publish to LMS"):
-        auth_token, perm_token = get_valid_tokens()
+    with st.container():
+        st.markdown("---")
+        st.subheader("🎉 Your Created Offer")
+        cols = st.columns([1, 3])
         
-        if not auth_token:
-            st.error("Cannot publish - authentication required")
-            st.stop()
+        with cols[0]:
+            icon = "💰" if params.get("offer_type") == "cashback" else "🏷️"
+            st.markdown(f"<h1 style='text-align: center;'>{icon}</h1>", unsafe_allow_html=True)
+        
+        with cols[1]:
+            st.markdown(f"""
+            **✨ {params.get('offer_name', 'Special Offer')}**  
+            💵 **{value_display}** {params.get('offer_type')}  
+            🛒 Min. spend: **{format_currency(params.get('min_spend', 0))}**  
+            ⏳ Valid until: **{end_date.strftime('%b %d, %Y')}**  
+            👥 For: **{params.get('audience', 'all customers').title()}**
+            """, unsafe_allow_html=True)
             
-        lms_payload = build_lms_payload(st.session_state.offer_params)
-        
-        with st.spinner("Publishing offer..."):
-            try:
-                response = requests.post(
-                    LMS_CONFIG['OFFER_URL'],
-                    json=lms_payload,
-                    headers={
-                        "x-pulse-current-client": LMS_CONFIG['CLIENT_ID'],
-                        "x-pulse-token": perm_token,
-                        "Authorization": f"Bearer {auth_token}",
-                        "Content-Type": "application/json"
-                    },
-                    timeout=15
-                )
-                
-                if response.status_code == 200:
-                    st.balloons()
-                    st.success("Successfully published to LMS!")
-                    st.json(response.json())
-                else:
-                    st.error(f"Publish failed (HTTP {response.status_code}): {response.text}")
-                    # Auto-refresh tokens on auth errors
-                    if response.status_code in [401, 403]:
-                        st.info("Attempting to refresh tokens...")
-                        if refresh_lms_tokens():
-                            st.rerun()
-            except requests.Timeout:
-                st.error("Request timeout - please try again")
-            except Exception as e:
-                st.error(f"Publish error: {str(e)}")
+            if params.get("conditions"):
+                st.markdown("**Conditions:**")
+                for condition in params["conditions"]:
+                    st.markdown(f"- {condition}")
     
-    # Offer Preview
     st.markdown("---")
-    st.markdown(f"### {st.session_state.offer_params['offer_name']}")
-    st.markdown(f"**Value:** {st.session_state.offer_params['value']}{'%' if st.session_state.offer_params['value_type'] == 'percentage' else '$'}") 
-    st.markdown(f"**Minimum Spend:** ${st.session_state.offer_params.get('min_spend', 0)}")
-    st.markdown(f"**Duration:** {st.session_state.offer_params.get('duration_days', 7)} days")
+    st.success("Offer updated successfully!")
+
+# Main workflow
+if st.button("Generate Offer") and user_prompt:
+    with st.spinner("Creating your offer..."):
+        st.session_state.offer_params = extract_offer_parameters(user_prompt, openai_api_key)
+        st.session_state.adjusted_params = st.session_state.offer_params.copy()
+        st.session_state.offer_created = True
+        st.rerun()
+
+if st.session_state.offer_params:
+    st.success("✅ Offer parameters extracted!")
+    
+    # Display raw parameters (with formatted currency)
+    params_display = st.session_state.offer_params.copy()
+    if 'min_spend' in params_display:
+        params_display['min_spend'] = format_currency(params_display['min_spend'])
+    st.json(params_display)
+
+if st.session_state.offer_created and st.session_state.adjusted_params:
+    st.success("✅ Adjust the offer below and see changes in real-time:")
+    
+    # Edit form - NOW DIRECTLY MODIFIES SESSION STATE
+    offer_editor()
+    
+    # Display the CURRENTLY EDITED offer (not the original)
+    display_offer(st.session_state.adjusted_params)
+    
+    if st.button("🔄 Refresh Preview"):
+        st.rerun()
