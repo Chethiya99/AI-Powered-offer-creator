@@ -8,173 +8,216 @@ from datetime import datetime, timedelta
 # Initialize session state
 if 'offer_params' not in st.session_state:
     st.session_state.offer_params = None
-if 'offer_created' not in st.session_state:
-    st.session_state.offer_created = False
-if 'lms_tokens' not in st.session_state:
-    st.session_state.lms_tokens = None
+if 'lms_auth' not in st.session_state:
+    st.session_state.lms_auth = {
+        'auth_token': None,
+        'permission_token': None,
+        'last_refreshed': None
+    }
 
-# LMS API Configuration
-LMS_AUTH_URL = "https://lmsdev.pulseid.com/1.0/auth/login-v2"
-LMS_OFFER_URL = "https://lmsdev-marketplace-api.pulseid.com/offer/show-and-save"
-LMS_CREDENTIALS = {
-    "email": "randil+offeragent@pulseid.com",
-    "password": "Test@123",
-    "app": "lms"
+# LMS Configuration
+LMS_CONFIG = {
+    'AUTH_URL': "https://lmsdev.pulseid.com/1.0/auth/login-v2",
+    'OFFER_URL': "https://lmsdev-marketplace-api.pulseid.com/offer/show-and-save",
+    'CLIENT_ID': "315",
+    'MERCHANT_ID': 1361,
+    'CREDENTIALS': {
+        "email": "randil+offeragent@pulseid.com",
+        "password": "Test@123",  # Replace with st.secrets in production
+        "app": "lms"
+    }
 }
 
-# Helper functions
-def format_currency(amount, escape=True):
-    return f"\\${amount}" if escape else f"${amount}"
-
-def get_lms_tokens():
+# Auth Management
+def refresh_lms_tokens():
+    """Get fresh LMS tokens with error handling"""
     try:
-        response = requests.post(LMS_AUTH_URL, json=LMS_CREDENTIALS)
+        response = requests.post(
+            LMS_CONFIG['AUTH_URL'],
+            json=LMS_CONFIG['CREDENTIALS'],
+            timeout=10
+        )
         if response.status_code == 200:
             data = response.json()
-            return data["authToken"], data["permissionToken"]
-        st.error(f"Auth failed: {response.text}")
-        return None, None
+            st.session_state.lms_auth = {
+                'auth_token': data["authToken"],
+                'permission_token': data["permissionToken"],
+                'last_refreshed': datetime.now()
+            }
+            return True
+        else:
+            st.error(f"Auth Failed (HTTP {response.status_code}): {response.text}")
     except Exception as e:
-        st.error(f"Auth error: {str(e)}")
-        return None, None
+        st.error(f"Auth Connection Error: {str(e)}")
+    return False
 
-def transform_to_lms_format(params):
-    """Convert our offer format to LMS API format"""
+def get_valid_tokens():
+    """Returns valid tokens, refreshing if needed"""
+    if not st.session_state.lms_auth['auth_token']:
+        if not refresh_lms_tokens():
+            return None, None
+    
+    # Optional: Add token expiration check here if LMS provides expires_in
+    return (
+        st.session_state.lms_auth['auth_token'],
+        st.session_state.lms_auth['permission_token']
+    )
+
+# Offer Transformation
+def build_lms_payload(offer_params):
+    """Convert our format to LMS API spec"""
+    end_date = datetime.now() + timedelta(days=offer_params.get("duration_days", 7))
+    
     return {
         "merchantInfo": {
-            "merchant": 1361,
+            "merchant": LMS_CONFIG['MERCHANT_ID'],
             "locations": []
         },
         "rules": {
-            "reward_type": "CASHBACK" if params["offer_type"] == "cashback" else "DISCOUNT",
+            "reward_type": "CASHBACK" if offer_params["offer_type"] == "cashback" else "DISCOUNT",
             "redemption_mechanism": "QR_CODE",
             "code_applicability": "SINGLE_USAGE",
-            "upload_mode": "ADD_CODES",
-            "reward_limit": params.get("max_redemptions", 100)
+            "reward_limit": offer_params.get("max_redemptions", 100),
+            "store_locations_codes": []
         },
         "addRules": {
             "no_end_date": "N",
             "start_date": datetime.now().strftime("%Y-%m-%d 00:00:00"),
-            "end_date": (datetime.now() + timedelta(days=params.get("duration_days", 7))).strftime("%Y-%m-%d 23:59:59"),
-            "days_of_week": ["EVERYDAY"],
+            "end_date": end_date.strftime("%Y-%m-%d 23:59:59"),
             "timezone": "Asia/Colombo",
             "purchase_channel": "E-COMMERCE"
         },
         "content": [{
             "language": "en",
-            "offer_title": params.get("offer_name", "Special Offer"),
-            "offer_description": f"{params['value']}% {params['offer_type']}" if params.get("value_type") == "percentage" else f"{format_currency(params['value'], False)} {params['offer_type']}",
-            "offer_terms_con": f"Min. spend: {format_currency(params.get('min_spend', 0), False)} | Valid for {params.get('duration_days', 7)} days"
+            "offer_title": offer_params.get("offer_name", "Special Offer"),
+            "offer_description": build_offer_description(offer_params),
+            "offer_terms_con": build_offer_terms(offer_params)
         }]
     }
 
+def build_offer_description(params):
+    """Generate marketing-friendly description"""
+    value_part = f"{params['value']}%" if params["value_type"] == "percentage" else f"${params['value']}"
+    return f"{value_part} {params['offer_type']} on orders over ${params.get('min_spend', 0)}"
+
+def build_offer_terms(params):
+    """Generate formatted terms"""
+    terms = [
+        f"Valid until {(datetime.now() + timedelta(days=params.get('duration_days', 7)):%b %d, %Y}",
+        f"Min. spend: ${params.get('min_spend', 0)}"
+    ]
+    if params.get("max_redemptions"):
+        terms.append(f"First {params['max_redemptions']} customers only")
+    return "\n".join([f"• {term}" for term in terms])
+
 # Streamlit UI
-st.set_page_config(page_title="AI Offer Creator", page_icon="✨")
-st.title("💡 AI-Powered Offer Creator")
+st.set_page_config(page_title="LMS Offer Creator", page_icon="✨")
+st.title("🚀 LMS Offer Creator")
 
-# API Key Input
-openai_api_key = st.text_input("OpenAI API Key:", type="password")
-if not openai_api_key:
-    st.warning("Please enter your OpenAI API key")
-    st.stop()
-
-# Offer Description
-user_prompt = st.text_area(
-    "Describe your offer:",
-    height=100,
-    placeholder="E.g., 'Give $20 cashback for first 10 customers spending $500+ in 7 days'"
-)
-
-# AI Extraction Function
-def extract_offer_params(prompt):
-    try:
-        client = openai.OpenAI(api_key=openai_api_key)
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{
-                "role": "system",
-                "content": """Extract offer details as JSON with:
-                {
-                    "offer_type": "cashback/discount",
-                    "value_type": "percentage/fixed",
-                    "value": 20,
-                    "min_spend": 50,
-                    "duration_days": 7,
-                    "offer_name": "name",
-                    "max_redemptions": null,
-                    "conditions": []
-                }"""
-            }, {"role": "user", "content": prompt}],
-            temperature=0.2
-        )
-        content = response.choices[0].message.content
-        return json.loads(re.sub(r'```json\n?(.*?)\n?```', r'\1', content, flags=re.DOTALL))
-    except Exception as e:
-        st.error(f"Extraction error: {str(e)}")
-        return None
-
-# Main Workflow
-if st.button("Generate Offer") and user_prompt:
-    with st.spinner("Creating your offer..."):
-        st.session_state.offer_params = extract_offer_params(user_prompt)
-        if st.session_state.offer_params:
-            st.session_state.lms_tokens = get_lms_tokens()
-
-if st.session_state.offer_params:
-    # Display Editable Preview
-    st.success("✅ Offer created! Review and publish:")
+# 1. Authentication Section
+with st.expander("🔐 LMS Authentication", expanded=True):
+    if st.button("Authenticate with LMS"):
+        if refresh_lms_tokens():
+            st.success("Successfully authenticated with LMS!")
     
+    if st.session_state.lms_auth['auth_token']:
+        st.info(f"Last authenticated: {st.session_state.lms_auth['last_refreshed']:%Y-%m-%d %H:%M}")
+    else:
+        st.warning("Not authenticated with LMS")
+
+# 2. Offer Creation
+openai_api_key = st.text_input("OpenAI API Key:", type="password")
+user_prompt = st.text_area("Describe your offer:", height=100)
+
+if st.button("Generate Offer") and user_prompt and openai_api_key:
+    with st.spinner("Analyzing your offer..."):
+        try:
+            client = openai.OpenAI(api_key=openai_api_key)
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{
+                    "role": "system",
+                    "content": """Extract offer details as JSON with:
+                    offer_type, value_type, value, min_spend, duration_days, 
+                    offer_name, max_redemptions, conditions"""
+                }, {"role": "user", "content": user_prompt}],
+                temperature=0.2
+            )
+            content = re.sub(r'```json\n?(.*?)\n?```', r'\1', response.choices[0].message.content, flags=re.DOTALL)
+            st.session_state.offer_params = json.loads(content)
+            st.success("Offer parameters extracted!")
+        except Exception as e:
+            st.error(f"Error generating offer: {str(e)}")
+
+# 3. Offer Preview & Publishing
+if st.session_state.offer_params:
+    st.subheader("📝 Offer Preview")
+    
+    # Editable Fields
     cols = st.columns(2)
     with cols[0]:
         st.session_state.offer_params["offer_name"] = st.text_input(
             "Offer Name", 
-            value=st.session_state.offer_params.get("offer_name", "")
+            value=st.session_state.offer_params.get("offer_name", "Special Offer")
         )
         st.session_state.offer_params["value"] = st.number_input(
-            "Percentage (%)" if st.session_state.offer_params.get("value_type") == "percentage" else "Amount ($)",
-            value=st.session_state.offer_params.get("value", 0)
+            "Value", 
+            value=st.session_state.offer_params["value"]
         )
         
     with cols[1]:
         st.session_state.offer_params["min_spend"] = st.number_input(
-            "Minimum Spend ($)",
+            "Minimum Spend", 
             value=st.session_state.offer_params.get("min_spend", 0)
         )
         st.session_state.offer_params["duration_days"] = st.number_input(
-            "Duration (Days)",
+            "Duration (Days)", 
             value=st.session_state.offer_params.get("duration_days", 7)
         )
-
-    # Publish to LMS
-    if st.session_state.lms_tokens and st.button("🚀 Publish to LMS"):
-        auth_token, perm_token = st.session_state.lms_tokens
-        lms_data = transform_to_lms_format(st.session_state.offer_params)
-        
-        headers = {
-            "x-pulse-current-client": "315",
-            "x-pulse-token": perm_token,
-            "Authorization": f"Bearer {auth_token}",
-            "Content-Type": "application/json"
-        }
-        
-        with st.spinner("Publishing..."):
-            response = requests.post(LMS_OFFER_URL, json=lms_data, headers=headers)
-            
-            if response.status_code == 200:
-                st.balloons()
-                st.success("Offer published to LMS!")
-                st.json(response.json())
-            else:
-                st.error(f"Publish failed: {response.text}")
-
-    # Offer Preview Card
-    st.markdown("---")
-    st.subheader("Offer Preview")
-    value_display = f"{st.session_state.offer_params['value']}%" if st.session_state.offer_params.get("value_type") == "percentage" else format_currency(st.session_state.offer_params['value'])
     
-    st.markdown(f"""
-    **✨ {st.session_state.offer_params.get('offer_name', 'Special Offer')}**  
-    💵 **{value_display}** {st.session_state.offer_params['offer_type']}  
-    🛒 Min. spend: **{format_currency(st.session_state.offer_params.get('min_spend', 0))}**  
-    ⏳ Valid for: **{st.session_state.offer_params.get('duration_days', 7)} days**
-    """, unsafe_allow_html=True)
+    # Publish Button
+    if st.button("🚀 Publish to LMS"):
+        auth_token, perm_token = get_valid_tokens()
+        
+        if not auth_token:
+            st.error("Cannot publish - authentication required")
+            st.stop()
+            
+        lms_payload = build_lms_payload(st.session_state.offer_params)
+        
+        with st.spinner("Publishing offer..."):
+            try:
+                response = requests.post(
+                    LMS_CONFIG['OFFER_URL'],
+                    json=lms_payload,
+                    headers={
+                        "x-pulse-current-client": LMS_CONFIG['CLIENT_ID'],
+                        "x-pulse-token": perm_token,
+                        "Authorization": f"Bearer {auth_token}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=15
+                )
+                
+                if response.status_code == 200:
+                    st.balloons()
+                    st.success("Successfully published to LMS!")
+                    st.json(response.json())
+                else:
+                    st.error(f"Publish failed (HTTP {response.status_code}): {response.text}")
+                    # Auto-refresh tokens on auth errors
+                    if response.status_code in [401, 403]:
+                        st.info("Attempting to refresh tokens...")
+                        if refresh_lms_tokens():
+                            st.rerun()
+            except requests.Timeout:
+                st.error("Request timeout - please try again")
+            except Exception as e:
+                st.error(f"Publish error: {str(e)}")
+    
+    # Offer Preview
+    st.markdown("---")
+    st.markdown(f"### {st.session_state.offer_params['offer_name']}")
+    st.markdown(f"**Value:** {st.session_state.offer_params['value']}{'%' if st.session_state.offer_params['value_type'] == 'percentage' else '$'}") 
+    st.markdown(f"**Minimum Spend:** ${st.session_state.offer_params.get('min_spend', 0)}")
+    st.markdown(f"**Duration:** {st.session_state.offer_params.get('duration_days', 7)} days")
