@@ -122,8 +122,8 @@ def publish_to_lms(params: dict):
         return None
 
 # Streamlit UI Setup
-st.set_page_config(page_title="AI-Powered Offer Creator", page_icon=":sparkles:")
-st.title(":bulb: AI-Powered Offer Creator")
+st.set_page_config(page_title="AI-Powered Offer Creator", page_icon="✨")
+st.title("💡 AI-Powered Offer Creator")
 st.markdown("Describe your offer in plain English, and let AI extract the details for you!")
 
 # Get OpenAI API key from secrets
@@ -224,18 +224,18 @@ def display_offer(params):
     value_display = f"{params['value']}%" if params.get("value_type") == "percentage" else format_currency(params['value'])
     with st.container():
         st.markdown("---")
-        st.subheader(":tada: Your Created Offer")
+        st.subheader("🎉 Your Created Offer")
         cols = st.columns([1, 3])
         with cols[0]:
-            icon = ":moneybag:" if params.get("offer_type") == "cashback" else ":label:"
+            icon = "💰" if params.get("offer_type") == "cashback" else "🏷️"
             st.markdown(f"<h1 style='text-align: center;'>{icon}</h1>", unsafe_allow_html=True)
         with cols[1]:
             st.markdown(f"""
-            **:sparkles: {params.get('offer_name', 'Special Offer')}**
-            :dollar: **{value_display}** {params.get('offer_type')}
-            :shopping_trolley: Min. spend: **{format_currency(params.get('min_spend', 0))}**
-            :hourglass_flowing_sand: Valid until: **{end_date.strftime('%b %d, %Y')}**
-            :busts_in_silhouette: For: **{params.get('audience', 'all customers').title()}**
+            **✨ {params.get('offer_name', 'Special Offer')}**  
+            💵 **{value_display}** {params.get('offer_type')}  
+            🛒 Min. spend: **{format_currency(params.get('min_spend', 0))}**  
+            ⏳ Valid until: **{end_date.strftime('%b %d, %Y')}**  
+            👥 For: **{params.get('audience', 'all customers').title()}**
             """, unsafe_allow_html=True)
             if params.get("conditions"):
                 st.markdown("**Conditions:**")
@@ -244,11 +244,11 @@ def display_offer(params):
     st.markdown("---")
     # Add publish button only when we have LMS credentials
     if st.session_state.lms_credentials['email'] and st.session_state.lms_credentials['password']:
-        if st.button(":rocket: Publish to LMS"):
+        if st.button("🚀 Publish to LMS"):
             with st.spinner("Publishing offer to LMS..."):
                 result = publish_to_lms(st.session_state.adjusted_params)
                 if result:
-                    st.success(":white_check_mark: Offer published to LMS successfully!")
+                    st.success("✅  Offer published to LMS successfully!")
                     st.json(result)
                 else:
                     st.error("Failed to publish offer to LMS")
@@ -264,7 +264,7 @@ if st.button("Generate Offer") and user_prompt:
         st.rerun()
 
 if st.session_state.offer_params:
-    st.success(":white_check_mark: Offer parameters extracted!")
+    st.success("✅  Offer parameters extracted!")
     # Display raw parameters (with formatted currency)
     params_display = st.session_state.offer_params.copy()
     if 'min_spend' in params_display:
@@ -277,5 +277,5 @@ if st.session_state.offer_created and st.session_state.adjusted_params:
     offer_editor()
     # Display the CURRENTLY EDITED offer (not the original)
     display_offer(st.session_state.adjusted_params)
-    if st.button(":arrows_counterclockwise: Refresh Preview"):
+    if st.button("🔄 Refresh Preview"):
         st.rerun()
