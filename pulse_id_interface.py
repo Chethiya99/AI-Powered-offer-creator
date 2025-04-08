@@ -312,5 +312,5 @@ if st.session_state.offer_created and st.session_state.adjusted_params:
     # Display the CURRENTLY EDITED offer (not the original)
     display_offer(st.session_state.adjusted_params)
     
-    if st.button("🔄 Refresh Preview", help="Update the offer preview with your changes")):
+    if st.button("🔄 Refresh Preview"):
         st.rerun()
