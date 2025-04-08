@@ -132,10 +132,10 @@ if not openai_api_key:
     st.error("OpenAI API key not found in secrets. Please configure the secrets.toml file.")
     st.stop()
 
-# LMS Credentials Section (display only, not editable)
-with st.expander("LMS Credentials (Configured in secrets.toml)"):
-    st.info(f"LMS Email: {st.session_state.lms_credentials['email']}")
-    st.info("LMS Password: **********")  # Don't show actual password
+# # LMS Credentials Section (display only, not editable)
+# with st.expander("LMS Credentials (Configured in secrets.toml)"):
+#     st.info(f"LMS Email: {st.session_state.lms_credentials['email']}")
+#     st.info("LMS Password: **********")  # Don't show actual password
 
 # User input with better examples
 user_prompt = st.text_area(
