@@ -139,7 +139,7 @@ if not openai_api_key:
 
 # User input with better examples
 user_prompt = st.text_area(
-    "Describe your offer (e.g., 'Give \\$20 cashback for first 10 customers spending \\$500+ in 7 days'):",
+    "Describe your offer (e.g., 'Give \\$20 cashback for first 10 customers spending \\$500+ valid for 7 days'):",
     height=100,
     help="Use dollar signs normally - we'll handle the formatting automatically"
 )
